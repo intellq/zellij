@@ -1,7 +1,6 @@
 ---
 source: zellij-utils/src/input/./unit/layout_test.rs
-assertion_line: 1887
-expression: "format!(\"{:#?}\", layout)"
+expression: "normalize_layout_debug(format!(\"{:#?}\", layout))"
 ---
 Layout {
     tabs: [
@@ -22,6 +21,7 @@ Layout {
                             ),
                         ),
                         borderless: None,
+                        border_style: None,
                         focus: None,
                         external_children_index: None,
                         children_are_stacked: false,
@@ -32,6 +32,8 @@ Layout {
                         pane_initial_contents: None,
                         default_fg: None,
                         default_bg: None,
+                        attention_muted: None,
+                        ignore_output: None,
                     },
                     TiledPaneLayout {
                         children_split_direction: Horizontal,
@@ -50,10 +52,12 @@ Layout {
                                     hold_on_start: false,
                                     originating_plugin: None,
                                     use_terminal_title: false,
+                                    notify: false,
                                 },
                             ),
                         ),
                         borderless: None,
+                        border_style: None,
                         focus: None,
                         external_children_index: None,
                         children_are_stacked: false,
@@ -64,6 +68,8 @@ Layout {
                         pane_initial_contents: None,
                         default_fg: None,
                         default_bg: None,
+                        attention_muted: None,
+                        ignore_output: None,
                     },
                     TiledPaneLayout {
                         children_split_direction: Horizontal,
@@ -80,6 +86,7 @@ Layout {
                                     ),
                                 ),
                                 borderless: None,
+                                border_style: None,
                                 focus: None,
                                 external_children_index: None,
                                 children_are_stacked: false,
@@ -90,6 +97,8 @@ Layout {
                                 pane_initial_contents: None,
                                 default_fg: None,
                                 default_bg: None,
+                                attention_muted: None,
+                                ignore_output: None,
                             },
                         ],
                         split_size: None,
@@ -99,6 +108,7 @@ Layout {
                             ),
                         ),
                         borderless: None,
+                        border_style: None,
                         focus: None,
                         external_children_index: None,
                         children_are_stacked: false,
@@ -109,6 +119,8 @@ Layout {
                         pane_initial_contents: None,
                         default_fg: None,
                         default_bg: None,
+                        attention_muted: None,
+                        ignore_output: None,
                     },
                 ],
                 split_size: None,
@@ -118,6 +130,7 @@ Layout {
                     ),
                 ),
                 borderless: None,
+                border_style: None,
                 focus: None,
                 external_children_index: None,
                 children_are_stacked: false,
@@ -128,6 +141,8 @@ Layout {
                 pane_initial_contents: None,
                 default_fg: None,
                 default_bg: None,
+                attention_muted: None,
+                ignore_output: None,
             },
             [],
         ),
@@ -142,6 +157,7 @@ Layout {
                 split_size: None,
                 run: None,
                 borderless: None,
+                border_style: None,
                 focus: None,
                 external_children_index: None,
                 children_are_stacked: false,
@@ -152,6 +168,8 @@ Layout {
                 pane_initial_contents: None,
                 default_fg: None,
                 default_bg: None,
+                attention_muted: None,
+                ignore_output: None,
             },
             [],
         ),

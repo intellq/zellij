@@ -1,5 +1,7 @@
 use std::str::FromStr;
 
+use crate::data::ClientId;
+
 use crate::{
     client_server_contract::client_server_contract::{
         client_to_server_msg, server_to_client_msg, ActionMsg, AttachClientMsg,
@@ -7,24 +9,28 @@ use crate::{
         ClientToServerMsg as ProtoClientToServerMsg, ColorRegistersMsg, ConfigFileUpdatedMsg,
         ConnStatusMsg, ConnectedMsg, DesktopNotificationResponseMsg, DetachSessionMsg,
         EmitNestedSessionFrameMsg, ExitMsg, ExitReason as ProtoExitReason,
-        FailedToStartWebServerMsg, FirstClientConnectedMsg, ForegroundColorMsg,
-        ForwardQueryToHostMsg, ForwardedReplyFromHostMsg, HostTerminalFocusChangedMsg,
-        HostTerminalThemeChangedMsg,
-        HostTerminalThemeIndication as ProtoHostTerminalThemeIndication,
+        FailedToStartWebServerMsg, FirstClientConnectedMsg, FontFamiliesMsg, ForegroundColorMsg,
+        ForwardQueryToHostMsg, ForwardedReplyFromHostMsg,
+        HostProgramStatus as ProtoHostProgramStatus, HostProgramStatusMsg,
+        HostTerminalFocusChangedMsg, HostTerminalThemeChangedMsg,
+        HostTerminalThemeIndication as ProtoHostTerminalThemeIndication, HostThemeModeMsg,
         InputMode as ProtoInputMode, KeyMsg, KillSessionMsg, KittyGraphicsSupportMsg,
-        LayoutMetadata as ProtoLayoutMetadata, LogErrorMsg, LogMsg, MobileActivePaneMsg,
-        MobilePaneMsg, MobileRenderPrefsMsg, MobileSessionMsg, MobileSizeMsg, MobileStateMsg,
-        MobileTabMsg, NestedSessionFrameFromHostMsg, PaneMetadata as ProtoPaneMetadata,
-        PaneRenderUpdateMsg, QueryTerminalSizeMsg, RenamedSessionMsg, RenderMsg,
-        RequestSessionListMsg, ServerToClientMsg as ProtoServerToClientMsg,
+        KittyZlibSupportMsg, LayoutMetadata as ProtoLayoutMetadata, LogErrorMsg, LogMsg,
+        MobileActivePaneMsg, MobilePaneMsg, MobileRenderPrefsMsg, MobileSessionMsg, MobileSizeMsg,
+        MobileStateMsg, MobileTabMsg, NestedSessionFrameFromHostMsg,
+        PaneMetadata as ProtoPaneMetadata, PaneRenderUpdateMsg, PeerAttentionChangedMsg,
+        QueryTerminalSizeMsg, RenamedSessionMsg, RenderFrameAckMsg, RenderFrameMsg, RenderMsg,
+        RequestSessionAttentionMsg, RequestSessionListMsg, RequestSessionPreviewMsg,
+        ServerToClientMsg as ProtoServerToClientMsg, SessionAttentionMsg, SessionPreviewMsg,
         SetMobileRenderPreferencesMsg, SetSoftKeyboardMsg, SixelSupportMsg,
-        SoftKeyboardVisibilityChangedMsg, StartWebServerMsg, SubscribeToPaneRendersMsg,
-        SubscribedPaneClosedMsg, SwitchSessionMsg, TabMetadata as ProtoTabMetadata,
-        TerminalPixelDimensionsMsg, TerminalResizeMsg, UnblockCliPipeInputMsg,
-        UnblockInputThreadMsg, WebServerStartedMsg,
+        SoftKeyboardVisibilityChangedMsg, StartWebServerMsg, StructuredRenderSupportMsg,
+        SubscribeToPaneRendersMsg, SubscribedPaneClosedMsg, SwitchSessionMsg,
+        TabMetadata as ProtoTabMetadata, TerminalPixelDimensionsMsg, TerminalResizeMsg,
+        UnblockCliPipeInputMsg, UnblockInputThreadMsg, WebServerStartedMsg, WindowSettingsMsg,
     },
     data::{HostTerminalThemeMode, InputMode, PaneId},
     errors::prelude::*,
+    input::window::WindowSettings,
     ipc::{
         ClientToServerMsg, ColorRegister, ExitReason, MobileActivePanePayload, MobilePanePayload,
         MobileRenderPrefsPayload, MobileSessionPayload, MobileSizePayload, MobileStatePayload,
@@ -164,10 +170,15 @@ impl From<ClientToServerMsg> for ProtoClientToServerMsg {
                     NestedSessionFrameFromHostMsg { payload_bytes },
                 )
             },
-            ClientToServerMsg::KittyGraphicsSupport { supported } => {
-                client_to_server_msg::Message::KittyGraphicsSupport(KittyGraphicsSupportMsg {
-                    supported,
-                })
+            ClientToServerMsg::KittyGraphicsSupport {
+                supported,
+                local_media,
+            } => client_to_server_msg::Message::KittyGraphicsSupport(KittyGraphicsSupportMsg {
+                supported,
+                local_media,
+            }),
+            ClientToServerMsg::KittyZlibSupport { supported } => {
+                client_to_server_msg::Message::KittyZlibSupport(KittyZlibSupportMsg { supported })
             },
             ClientToServerMsg::SixelSupport { supported } => {
                 client_to_server_msg::Message::SixelSupport(SixelSupportMsg { supported })
@@ -175,6 +186,30 @@ impl From<ClientToServerMsg> for ProtoClientToServerMsg {
             ClientToServerMsg::RequestSessionList => {
                 client_to_server_msg::Message::RequestSessionList(RequestSessionListMsg {})
             },
+            ClientToServerMsg::RequestSessionPreview {
+                tab_index,
+                pane_id,
+                anchor,
+            } => client_to_server_msg::Message::RequestSessionPreview(RequestSessionPreviewMsg {
+                tab_index,
+                pane_id: pane_id.map(|(id, _)| id),
+                pane_is_plugin: pane_id.map(|(_, is_plugin)| is_plugin).unwrap_or(false),
+                anchor: anchor.map(super::attention_conversion::preview_anchor_to_proto),
+            }),
+            ClientToServerMsg::RequestSessionAttention {
+                include_command_text,
+            } => {
+                client_to_server_msg::Message::RequestSessionAttention(RequestSessionAttentionMsg {
+                    include_command_text,
+                })
+            },
+            ClientToServerMsg::PeerAttentionChanged {
+                session_name,
+                attention,
+            } => client_to_server_msg::Message::PeerAttentionChanged(PeerAttentionChangedMsg {
+                session_name,
+                attention: attention.map(|a| a.into()),
+            }),
             ClientToServerMsg::SetMobileRenderPreferences { single_pane, fit } => {
                 client_to_server_msg::Message::SetMobileRenderPreferences(
                     SetMobileRenderPreferencesMsg { single_pane, fit },
@@ -184,6 +219,17 @@ impl From<ClientToServerMsg> for ProtoClientToServerMsg {
                 client_to_server_msg::Message::HostTerminalFocusChanged(
                     HostTerminalFocusChangedMsg { focused },
                 )
+            },
+            ClientToServerMsg::StructuredRenderSupport { supported } => {
+                client_to_server_msg::Message::StructuredRenderSupport(StructuredRenderSupportMsg {
+                    supported,
+                })
+            },
+            ClientToServerMsg::RenderFrameAck { seq } => {
+                client_to_server_msg::Message::RenderFrameAck(RenderFrameAckMsg { seq })
+            },
+            ClientToServerMsg::FontFamilies { families } => {
+                client_to_server_msg::Message::FontFamilies(FontFamiliesMsg { families })
             },
         };
 
@@ -201,7 +247,11 @@ impl TryFrom<ProtoClientToServerMsg> for ClientToServerMsg {
         match msg.message {
             Some(client_to_server_msg::Message::DetachSession(detach)) => {
                 Ok(ClientToServerMsg::DetachSession {
-                    client_ids: detach.client_ids.into_iter().map(|id| id as u16).collect(),
+                    client_ids: detach
+                        .client_ids
+                        .into_iter()
+                        .map(|id| id as ClientId)
+                        .collect(),
                 })
             },
             Some(client_to_server_msg::Message::TerminalPixelDimensions(pixel_dims)) => {
@@ -274,7 +324,7 @@ impl TryFrom<ProtoClientToServerMsg> for ClientToServerMsg {
                     .ok_or_else(|| anyhow!("Missing action"))?
                     .try_into()?,
                 terminal_id: action.terminal_id,
-                client_id: action.client_id.map(|id| id as u16),
+                client_id: action.client_id.map(|id| id as ClientId),
                 is_cli_client: action.is_cli_client,
             }),
             Some(client_to_server_msg::Message::Key(key)) => Ok(ClientToServerMsg::Key {
@@ -340,6 +390,12 @@ impl TryFrom<ProtoClientToServerMsg> for ClientToServerMsg {
             Some(client_to_server_msg::Message::KittyGraphicsSupport(msg)) => {
                 Ok(ClientToServerMsg::KittyGraphicsSupport {
                     supported: msg.supported,
+                    local_media: msg.local_media,
+                })
+            },
+            Some(client_to_server_msg::Message::KittyZlibSupport(msg)) => {
+                Ok(ClientToServerMsg::KittyZlibSupport {
+                    supported: msg.supported,
                 })
             },
             Some(client_to_server_msg::Message::SixelSupport(msg)) => {
@@ -350,6 +406,27 @@ impl TryFrom<ProtoClientToServerMsg> for ClientToServerMsg {
             Some(client_to_server_msg::Message::RequestSessionList(_)) => {
                 Ok(ClientToServerMsg::RequestSessionList)
             },
+            Some(client_to_server_msg::Message::RequestSessionPreview(msg)) => {
+                Ok(ClientToServerMsg::RequestSessionPreview {
+                    tab_index: msg.tab_index,
+                    pane_id: msg.pane_id.map(|id| (id, msg.pane_is_plugin)),
+                    anchor: msg
+                        .anchor
+                        .map(super::attention_conversion::preview_anchor_from_proto)
+                        .transpose()?,
+                })
+            },
+            Some(client_to_server_msg::Message::RequestSessionAttention(msg)) => {
+                Ok(ClientToServerMsg::RequestSessionAttention {
+                    include_command_text: msg.include_command_text,
+                })
+            },
+            Some(client_to_server_msg::Message::PeerAttentionChanged(msg)) => {
+                Ok(ClientToServerMsg::PeerAttentionChanged {
+                    session_name: msg.session_name,
+                    attention: msg.attention.map(|a| a.try_into()).transpose()?,
+                })
+            },
             Some(client_to_server_msg::Message::SetMobileRenderPreferences(msg)) => {
                 Ok(ClientToServerMsg::SetMobileRenderPreferences {
                     single_pane: msg.single_pane,
@@ -359,6 +436,19 @@ impl TryFrom<ProtoClientToServerMsg> for ClientToServerMsg {
             Some(client_to_server_msg::Message::HostTerminalFocusChanged(msg)) => {
                 Ok(ClientToServerMsg::HostTerminalFocusChanged {
                     focused: msg.focused,
+                })
+            },
+            Some(client_to_server_msg::Message::StructuredRenderSupport(msg)) => {
+                Ok(ClientToServerMsg::StructuredRenderSupport {
+                    supported: msg.supported,
+                })
+            },
+            Some(client_to_server_msg::Message::RenderFrameAck(msg)) => {
+                Ok(ClientToServerMsg::RenderFrameAck { seq: msg.seq })
+            },
+            Some(client_to_server_msg::Message::FontFamilies(msg)) => {
+                Ok(ClientToServerMsg::FontFamilies {
+                    families: msg.families,
                 })
             },
             None => Err(anyhow!("Empty ClientToServerMsg message")),
@@ -372,6 +462,9 @@ impl From<ServerToClientMsg> for ProtoServerToClientMsg {
         let message = match msg {
             ServerToClientMsg::Render { content } => {
                 server_to_client_msg::Message::Render(RenderMsg { content })
+            },
+            ServerToClientMsg::RenderFrame { frame } => {
+                server_to_client_msg::Message::RenderFrame(RenderFrameMsg { frame })
             },
             ServerToClientMsg::UnblockInputThread => {
                 server_to_client_msg::Message::UnblockInputThread(UnblockInputThreadMsg {})
@@ -403,11 +496,13 @@ impl From<ServerToClientMsg> for ProtoServerToClientMsg {
                     connect_to_session: Some(connect_to_session.into()),
                 })
             },
-            ServerToClientMsg::UnblockCliPipeInput { pipe_name } => {
-                server_to_client_msg::Message::UnblockCliPipeInput(UnblockCliPipeInputMsg {
-                    pipe_name,
-                })
-            },
+            ServerToClientMsg::UnblockCliPipeInput {
+                pipe_name,
+                exit_code,
+            } => server_to_client_msg::Message::UnblockCliPipeInput(UnblockCliPipeInputMsg {
+                pipe_name,
+                exit_code,
+            }),
             ServerToClientMsg::CliPipeOutput { pipe_name, output } => {
                 server_to_client_msg::Message::CliPipeOutput(CliPipeOutputMsg { pipe_name, output })
             },
@@ -422,6 +517,17 @@ impl From<ServerToClientMsg> for ProtoServerToClientMsg {
             },
             ServerToClientMsg::ConfigFileUpdated => {
                 server_to_client_msg::Message::ConfigFileUpdated(ConfigFileUpdatedMsg {})
+            },
+            ServerToClientMsg::WindowSettingsChanged { settings } => {
+                server_to_client_msg::Message::WindowSettings(WindowSettingsMsg {
+                    settings_json: settings.to_json().unwrap_or_default(),
+                })
+            },
+            ServerToClientMsg::HostTerminalThemeChanged { mode } => {
+                let proto_mode: ProtoHostTerminalThemeIndication = mode.into();
+                server_to_client_msg::Message::HostThemeMode(HostThemeModeMsg {
+                    mode: proto_mode as i32,
+                })
             },
             ServerToClientMsg::PaneRenderUpdate {
                 pane_id,
@@ -459,6 +565,26 @@ impl From<ServerToClientMsg> for ProtoServerToClientMsg {
             },
             ServerToClientMsg::MobileState { payload } => {
                 server_to_client_msg::Message::MobileState(mobile_state_payload_to_proto(payload))
+            },
+            ServerToClientMsg::HostProgramStatus { status } => {
+                server_to_client_msg::Message::HostProgramStatus(HostProgramStatusMsg {
+                    status: status.map(|status| ProtoHostProgramStatus {
+                        state: status.state,
+                        kind: status.kind,
+                        progress: status.progress.map(|p| p as u32),
+                        msg: status.msg,
+                    }),
+                })
+            },
+            ServerToClientMsg::SessionPreview { preview } => {
+                server_to_client_msg::Message::SessionPreview(SessionPreviewMsg {
+                    preview: preview.map(|p| p.into()),
+                })
+            },
+            ServerToClientMsg::SessionAttention { attention } => {
+                server_to_client_msg::Message::SessionAttention(SessionAttentionMsg {
+                    attention: Some(attention.into()),
+                })
             },
         };
 
@@ -596,6 +722,9 @@ impl TryFrom<ProtoServerToClientMsg> for ServerToClientMsg {
             Some(server_to_client_msg::Message::Render(render)) => Ok(ServerToClientMsg::Render {
                 content: render.content,
             }),
+            Some(server_to_client_msg::Message::RenderFrame(msg)) => {
+                Ok(ServerToClientMsg::RenderFrame { frame: msg.frame })
+            },
             Some(server_to_client_msg::Message::UnblockInputThread(_)) => {
                 Ok(ServerToClientMsg::UnblockInputThread)
             },
@@ -642,6 +771,7 @@ impl TryFrom<ProtoServerToClientMsg> for ServerToClientMsg {
             Some(server_to_client_msg::Message::UnblockCliPipeInput(unblock)) => {
                 Ok(ServerToClientMsg::UnblockCliPipeInput {
                     pipe_name: unblock.pipe_name,
+                    exit_code: unblock.exit_code,
                 })
             },
             Some(server_to_client_msg::Message::CliPipeOutput(pipe_output)) => {
@@ -659,8 +789,23 @@ impl TryFrom<ProtoServerToClientMsg> for ServerToClientMsg {
             Some(server_to_client_msg::Message::RenamedSession(renamed)) => {
                 Ok(ServerToClientMsg::RenamedSession { name: renamed.name })
             },
+            Some(server_to_client_msg::Message::HostThemeMode(msg)) => {
+                let proto_mode = ProtoHostTerminalThemeIndication::try_from(msg.mode)
+                    .ok()
+                    .ok_or_else(|| anyhow!("Unknown HostTerminalThemeIndication: {}", msg.mode))?;
+                Ok(ServerToClientMsg::HostTerminalThemeChanged {
+                    mode: proto_mode.into(),
+                })
+            },
             Some(server_to_client_msg::Message::ConfigFileUpdated(_)) => {
                 Ok(ServerToClientMsg::ConfigFileUpdated)
+            },
+            Some(server_to_client_msg::Message::WindowSettings(msg)) => {
+                let settings = WindowSettings::from_json(&msg.settings_json)
+                    .map_err(|e| anyhow!("Unreadable window settings: {}", e))?;
+                Ok(ServerToClientMsg::WindowSettingsChanged {
+                    settings: Box::new(settings),
+                })
             },
             Some(server_to_client_msg::Message::PaneRenderUpdate(msg)) => {
                 let pane_id: PaneId = msg
@@ -704,6 +849,32 @@ impl TryFrom<ProtoServerToClientMsg> for ServerToClientMsg {
             Some(server_to_client_msg::Message::MobileState(msg)) => {
                 Ok(ServerToClientMsg::MobileState {
                     payload: mobile_state_payload_from_proto(msg),
+                })
+            },
+            Some(server_to_client_msg::Message::HostProgramStatus(msg)) => {
+                Ok(ServerToClientMsg::HostProgramStatus {
+                    status: msg
+                        .status
+                        .map(|status| crate::attention::HostProgramStatus {
+                            state: status.state,
+                            kind: status.kind,
+                            progress: status.progress.map(|p| p.min(100) as u8),
+                            msg: status.msg,
+                        }),
+                })
+            },
+            Some(server_to_client_msg::Message::SessionPreview(msg)) => {
+                Ok(ServerToClientMsg::SessionPreview {
+                    preview: msg.preview.map(|p| p.into()),
+                })
+            },
+            Some(server_to_client_msg::Message::SessionAttention(msg)) => {
+                Ok(ServerToClientMsg::SessionAttention {
+                    attention: msg
+                        .attention
+                        .map(|a| a.try_into())
+                        .transpose()?
+                        .unwrap_or_default(),
                 })
             },
             None => Err(anyhow!("Empty ServerToClientMsg message")),
@@ -849,6 +1020,7 @@ impl From<crate::input::cli_assets::CliAssets>
                 .initial_panes
                 .map(|panes| panes.into_iter().map(|p| p.into()).collect())
                 .unwrap_or_default(),
+            switch_context: cli_assets.switch_context.map(|c| c.into()),
         }
     }
 }
@@ -890,6 +1062,10 @@ impl TryFrom<crate::client_server_contract::client_server_contract::CliAssets>
                         .collect::<Result<Vec<_>>>()?,
                 )
             },
+            switch_context: cli_assets
+                .switch_context
+                .map(|c| c.try_into())
+                .transpose()?,
         })
     }
 }
@@ -918,6 +1094,13 @@ impl From<crate::input::options::Options>
                 .map(|p| p.to_string_lossy().to_string()),
             layout_dir: options.layout_dir.map(|p| p.to_string_lossy().to_string()),
             theme_dir: options.theme_dir.map(|p| p.to_string_lossy().to_string()),
+            keybinds_dir: options
+                .keybinds_dir
+                .map(|p| p.to_string_lossy().to_string()),
+            keybinds_preset: options.keybinds_preset,
+            keybinds_primary: options.keybinds_primary,
+            keybinds_secondary: options.keybinds_secondary,
+            keybinds_unlock: options.keybinds_unlock,
             mouse_mode: options.mouse_mode,
             pane_frames: options.pane_frames,
             mirror_session: options.mirror_session,
@@ -947,6 +1130,7 @@ impl From<crate::input::options::Options>
             disable_session_metadata: options.disable_session_metadata,
             support_kitty_keyboard_protocol: options.support_kitty_keyboard_protocol,
             support_kitty_graphics_protocol: options.support_kitty_graphics_protocol,
+            grapheme_clusters: options.grapheme_clusters,
             web_server: options.web_server,
             web_sharing: options.web_sharing.map(|w| match w {
                 crate::data::WebSharing::On => ProtoWebSharing::On as i32,
@@ -956,6 +1140,9 @@ impl From<crate::input::options::Options>
             stacked_resize: options.stacked_resize,
             stacked_pane_list: options.stacked_pane_list,
             dangerously_enable_paste_buffer_read: options.dangerously_enable_paste_buffer_read,
+            session_indicator: options.session_indicator,
+            swap_layout_notification: options.swap_layout_notification,
+            on_quit: options.on_quit.map(|on_quit| on_quit.as_str().to_owned()),
             show_startup_tips: options.show_startup_tips,
             show_release_notes: options.show_release_notes,
             advanced_mouse_actions: options.advanced_mouse_actions,
@@ -972,11 +1159,14 @@ impl From<crate::input::options::Options>
                 .web_server_key
                 .map(|p| p.to_string_lossy().to_string()),
             enforce_https_for_localhost: options.enforce_https_for_localhost,
+            dangerously_allow_web_serving_without_a_certificate: options
+                .dangerously_allow_web_serving_without_a_certificate,
             post_command_discovery_hook: options.post_command_discovery_hook,
             client_async_worker_tasks: options.client_async_worker_tasks.map(|v| v as u64),
             visual_bell: options.visual_bell,
             focus_follows_mouse: options.focus_follows_mouse,
             mouse_click_through: options.mouse_click_through,
+            context_menu_enabled: options.context_menu_enabled,
             osc133_command_selection: options.osc133_command_selection,
             word_separators: options.word_separators,
             host_notification_protocol: options
@@ -1036,6 +1226,11 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Options>
             default_layout: options.default_layout.map(std::path::PathBuf::from),
             layout_dir: options.layout_dir.map(std::path::PathBuf::from),
             theme_dir: options.theme_dir.map(std::path::PathBuf::from),
+            keybinds_dir: options.keybinds_dir.map(std::path::PathBuf::from),
+            keybinds_preset: options.keybinds_preset,
+            keybinds_primary: options.keybinds_primary,
+            keybinds_secondary: options.keybinds_secondary,
+            keybinds_unlock: options.keybinds_unlock,
             mouse_mode: options.mouse_mode,
             pane_frames: options.pane_frames,
             pane_frame_style: options.pane_frame_style.as_deref().and_then(|s| match s {
@@ -1081,6 +1276,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Options>
             disable_session_metadata: options.disable_session_metadata,
             support_kitty_keyboard_protocol: options.support_kitty_keyboard_protocol,
             support_kitty_graphics_protocol: options.support_kitty_graphics_protocol,
+            grapheme_clusters: options.grapheme_clusters,
             web_server: options.web_server,
             web_sharing: options
                 .web_sharing
@@ -1094,6 +1290,16 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Options>
             stacked_resize: options.stacked_resize,
             stacked_pane_list: options.stacked_pane_list,
             dangerously_enable_paste_buffer_read: options.dangerously_enable_paste_buffer_read,
+            session_indicator: options.session_indicator,
+            swap_layout_notification: options.swap_layout_notification,
+            on_quit: options
+                .on_quit
+                .map(|on_quit| {
+                    on_quit
+                        .parse::<crate::input::options::OnQuit>()
+                        .map_err(|e| anyhow!(e))
+                })
+                .transpose()?,
             show_startup_tips: options.show_startup_tips,
             show_release_notes: options.show_release_notes,
             advanced_mouse_actions: options.advanced_mouse_actions,
@@ -1110,11 +1316,14 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Options>
             web_server_cert: options.web_server_cert.map(std::path::PathBuf::from),
             web_server_key: options.web_server_key.map(std::path::PathBuf::from),
             enforce_https_for_localhost: options.enforce_https_for_localhost,
+            dangerously_allow_web_serving_without_a_certificate: options
+                .dangerously_allow_web_serving_without_a_certificate,
             post_command_discovery_hook: options.post_command_discovery_hook,
             client_async_worker_tasks: options.client_async_worker_tasks.map(|v| v as usize),
             visual_bell: options.visual_bell,
             focus_follows_mouse: options.focus_follows_mouse,
             mouse_click_through: options.mouse_click_through,
+            context_menu_enabled: options.context_menu_enabled,
             osc133_command_selection: options.osc133_command_selection,
             word_separators: options.word_separators,
             host_notification_protocol: options
@@ -1164,6 +1373,10 @@ impl From<crate::input::actions::Action>
     fn from(action: crate::input::actions::Action) -> Self {
         use crate::client_server_contract::client_server_contract::{
             action::ActionType,
+            ApplyFloatingSwapLayoutAction,
+            ApplyFloatingSwapLayoutByTabIdAction,
+            ApplyTiledSwapLayoutAction,
+            ApplyTiledSwapLayoutByTabIdAction,
             AreFloatingPanesVisibleAction,
             BreakPaneAction,
             BreakPaneLeftAction,
@@ -1184,6 +1397,7 @@ impl From<crate::input::actions::Action>
             CurrentTabInfoAction,
             DenyAction,
             DetachAction,
+            DismissInfoPopupsAction,
             DumpLayoutAction,
             DumpScreenAction,
             EditFileAction,
@@ -1197,7 +1411,10 @@ impl From<crate::input::actions::Action>
             FocusPluginPaneWithIdAction,
             FocusPreviousPaneAction,
             FocusTerminalPaneWithIdAction,
+            GoToNextAttentionAction,
+            GoToNextSessionAction,
             GoToNextTabAction,
+            GoToPreviousSessionAction,
             GoToPreviousTabAction,
             GoToTabAction,
             GoToTabByIdAction,
@@ -1207,12 +1424,16 @@ impl From<crate::input::actions::Action>
             HalfPageScrollUpAction,
             HalfPageScrollUpByPaneIdAction,
             HideFloatingPanesAction,
+            IgnorePaneOutputAction,
+            IgnorePaneOutputByPaneIdAction,
             KeybindPipeAction,
             LaunchOrFocusPluginAction,
             LaunchPluginAction,
             ListClientsAction,
             ListPanesAction,
             ListTabsAction,
+            MarkAllSeenAction,
+            MarkPaneSeenAction,
             MouseEventAction,
             MoveFocusAction,
             MoveFocusOrTabAction,
@@ -1222,6 +1443,12 @@ impl From<crate::input::actions::Action>
             MovePaneByPaneIdAction,
             MoveTabAction,
             MoveTabByTabIdAction,
+            MoveTabToPositionAction,
+            MutePaneAction,
+            MutePaneByPaneIdAction,
+            MuteSessionAction,
+            MuteTabAction,
+            MuteTabByTabIdAction,
             NewBlockingPaneAction,
             NewFloatingPaneAction,
             NewFloatingPluginPaneAction,
@@ -1235,6 +1462,8 @@ impl From<crate::input::actions::Action>
             NextSwapLayoutAction,
             NextSwapLayoutByTabIdAction,
             NoOpAction,
+            OpenContextMenuAction,
+            OpenSessionInWindowAction,
             OverrideLayoutAction,
             PageScrollDownAction,
             PageScrollDownByPaneIdAction,
@@ -1256,6 +1485,7 @@ impl From<crate::input::actions::Action>
             ResizeAction,
             ResizeByPaneIdAction,
             RunAction,
+            RunInBackgroundAction,
             SaveSessionAction,
             ScrollDownAction,
             ScrollDownAtAction,
@@ -1274,8 +1504,10 @@ impl From<crate::input::actions::Action>
             SearchInputAction,
             SearchToggleOptionAction,
             SelectCommandAtScrollPositionAction,
+            SessionNameInputAction,
             SetDarkThemeAction,
             SetLightThemeAction,
+            SetPaneBorderStyleAction,
             SetPaneBorderlessAction,
             SetPaneColorAction,
             SetPaneFrameStyleAction,
@@ -1283,6 +1515,8 @@ impl From<crate::input::actions::Action>
             SkipConfirmAction,
             StackPanesAction,
             StartOrReloadPluginAction,
+            StartRenamePaneByPaneIdAction,
+            StartRenameTabByTabIdAction,
             SwitchFocusAction,
             SwitchModeForAllClientsAction,
             SwitchSessionAction,
@@ -1304,18 +1538,27 @@ impl From<crate::input::actions::Action>
             TogglePaneEmbedOrFloatingByPaneIdAction,
             TogglePaneFramesAction,
             TogglePaneInGroupAction,
+            TogglePaneInGroupByPaneIdAction,
             TogglePanePinnedAction,
             TogglePanePinnedByPaneIdAction,
+            ToggleSessionAction,
+            ToggleSessionCardAction,
             ToggleTabAction,
             ToggleThemeAction,
+            ToggleTrayIconAction,
             UndoRenamePaneAction,
             UndoRenamePaneByPaneIdAction,
+            UndoRenameSessionAction,
             UndoRenameTabAction,
             // Tab-targeting
             UndoRenameTabByTabIdAction,
+            WaitForPaneExitAction,
+            WatchPaneAction,
+            WatchPaneByPaneIdAction,
             WriteAction,
             WriteCharsAction,
             WriteCharsToPaneIdAction,
+            WriteKeyToPaneIdAction,
             WriteToPaneIdAction,
         };
         use std::collections::HashMap;
@@ -1554,6 +1797,7 @@ impl From<crate::input::actions::Action>
                 near_current_pane,
                 no_focus,
                 borderless,
+                border_style,
                 tab_id,
                 ..
             } => ActionType::NewTiledPane(NewTiledPaneAction {
@@ -1562,6 +1806,7 @@ impl From<crate::input::actions::Action>
                 pane_name,
                 near_current_pane,
                 borderless,
+                border_style: border_style.map(|b| b.into()),
                 tab_id: tab_id.map(|t| t as u32),
                 no_focus,
             }),
@@ -1698,6 +1943,14 @@ impl From<crate::input::actions::Action>
             crate::input::actions::Action::UndoRenameTab => {
                 ActionType::UndoRenameTab(UndoRenameTabAction {})
             },
+            crate::input::actions::Action::SessionNameInput { input } => {
+                ActionType::SessionNameInput(SessionNameInputAction {
+                    input: input.into_iter().map(|b| b as u32).collect(),
+                })
+            },
+            crate::input::actions::Action::UndoRenameSession => {
+                ActionType::UndoRenameSession(UndoRenameSessionAction {})
+            },
             crate::input::actions::Action::MoveTab { direction } => {
                 ActionType::MoveTab(MoveTabAction {
                     direction: direction_to_proto_i32(direction),
@@ -1712,6 +1965,11 @@ impl From<crate::input::actions::Action>
                 near_current_pane,
                 no_focus,
             }),
+            crate::input::actions::Action::RunInBackground { command } => {
+                ActionType::RunInBackground(RunInBackgroundAction {
+                    command: Some(command.into()),
+                })
+            },
             crate::input::actions::Action::Detach => ActionType::Detach(DetachAction {}),
             crate::input::actions::Action::SetDarkTheme => {
                 ActionType::SetDarkTheme(SetDarkThemeAction {})
@@ -1722,13 +1980,94 @@ impl From<crate::input::actions::Action>
             crate::input::actions::Action::ToggleTheme => {
                 ActionType::ToggleTheme(ToggleThemeAction {})
             },
+            crate::input::actions::Action::DismissInfoPopups => {
+                ActionType::DismissInfoPopups(DismissInfoPopupsAction {})
+            },
+            crate::input::actions::Action::MutePane => ActionType::MutePane(MutePaneAction {}),
+            crate::input::actions::Action::IgnorePaneOutput => {
+                ActionType::IgnorePaneOutput(IgnorePaneOutputAction {})
+            },
+            crate::input::actions::Action::WatchPane => ActionType::WatchPane(WatchPaneAction {}),
+            crate::input::actions::Action::MuteTab => ActionType::MuteTab(MuteTabAction {}),
+            crate::input::actions::Action::MuteSession => {
+                ActionType::MuteSession(MuteSessionAction {})
+            },
+            crate::input::actions::Action::ToggleSession => {
+                ActionType::ToggleSession(ToggleSessionAction {})
+            },
+            crate::input::actions::Action::GoToPreviousSession => {
+                ActionType::GoToPreviousSession(GoToPreviousSessionAction {})
+            },
+            crate::input::actions::Action::GoToNextSession => {
+                ActionType::GoToNextSession(GoToNextSessionAction {})
+            },
+            crate::input::actions::Action::GoToNextAttention => {
+                ActionType::GoToNextAttention(GoToNextAttentionAction {})
+            },
+            crate::input::actions::Action::ToggleTrayIcon => {
+                ActionType::ToggleTrayIcon(ToggleTrayIconAction {})
+            },
+            crate::input::actions::Action::OpenSessionInWindow => {
+                ActionType::OpenSessionInWindow(OpenSessionInWindowAction {})
+            },
+            crate::input::actions::Action::WaitForPaneExit { pane_id } => {
+                ActionType::WaitForPaneExit(WaitForPaneExitAction {
+                    pane_id: Some(pane_id.into()),
+                })
+            },
+            crate::input::actions::Action::MarkPaneSeen { session, pane_id } => {
+                ActionType::MarkPaneSeen(MarkPaneSeenAction {
+                    session,
+                    pane_id: pane_id.map(|p| p.into()),
+                })
+            },
+            crate::input::actions::Action::MarkAllSeen {
+                session,
+                this_session,
+            } => ActionType::MarkAllSeen(MarkAllSeenAction {
+                session,
+                this_session,
+            }),
+            crate::input::actions::Action::WriteKeyToPaneId {
+                key_with_modifier,
+                pane_id,
+            } => ActionType::WriteKeyToPaneId(WriteKeyToPaneIdAction {
+                key_with_modifier: key_with_modifier.map(|k| k.into()),
+                pane_id: Some(pane_id.into()),
+            }),
+            crate::input::actions::Action::MutePaneByPaneId { pane_id } => {
+                ActionType::MutePaneByPaneId(MutePaneByPaneIdAction {
+                    pane_id: Some(pane_id.into()),
+                })
+            },
+            crate::input::actions::Action::IgnorePaneOutputByPaneId { pane_id } => {
+                ActionType::IgnorePaneOutputByPaneId(IgnorePaneOutputByPaneIdAction {
+                    pane_id: Some(pane_id.into()),
+                })
+            },
+            crate::input::actions::Action::WatchPaneByPaneId { pane_id } => {
+                ActionType::WatchPaneByPaneId(WatchPaneByPaneIdAction {
+                    pane_id: Some(pane_id.into()),
+                })
+            },
+            crate::input::actions::Action::MuteTabByTabId { id } => {
+                ActionType::MuteTabByTabId(MuteTabByTabIdAction { id })
+            },
+            crate::input::actions::Action::ToggleSessionCard => {
+                ActionType::ToggleSessionCard(ToggleSessionCardAction {})
+            },
+            crate::input::actions::Action::OpenContextMenu => {
+                ActionType::OpenContextMenu(OpenContextMenuAction {})
+            },
             crate::input::actions::Action::SwitchSession {
                 name,
                 tab_position,
                 pane_id,
                 layout,
                 cwd,
+                close_current,
             } => ActionType::SwitchSession(SwitchSessionAction {
+                close_current,
                 name: name.clone(),
                 tab_position: tab_position.map(|p| p as u32),
                 pane_id: pane_id.map(|(id, is_plugin)| PaneIdWithPlugin {
@@ -1812,6 +2151,12 @@ impl From<crate::input::actions::Action>
             },
             crate::input::actions::Action::NextSwapLayout => {
                 ActionType::NextSwapLayout(NextSwapLayoutAction {})
+            },
+            crate::input::actions::Action::ApplyTiledSwapLayout { name } => {
+                ActionType::ApplyTiledSwapLayout(ApplyTiledSwapLayoutAction { name })
+            },
+            crate::input::actions::Action::ApplyFloatingSwapLayout { name } => {
+                ActionType::ApplyFloatingSwapLayout(ApplyFloatingSwapLayoutAction { name })
             },
             crate::input::actions::Action::OverrideLayout {
                 tabs,
@@ -1956,6 +2301,8 @@ impl From<crate::input::actions::Action>
                 in_place,
                 cwd,
                 pane_title,
+                popup,
+                popup_no_focus,
             } => ActionType::CliPipe(CliPipeAction {
                 pipe_id,
                 name,
@@ -1973,6 +2320,8 @@ impl From<crate::input::actions::Action>
                 in_place,
                 cwd: cwd.map(|p| p.to_string_lossy().to_string()),
                 pane_title,
+                popup: popup.map(|p| p.to_string()),
+                popup_no_focus,
             }),
             crate::input::actions::Action::KeybindPipe {
                 name,
@@ -2049,6 +2398,13 @@ impl From<crate::input::actions::Action>
             } => ActionType::SetPaneBorderless(SetPaneBorderlessAction {
                 pane_id: Some(pane_id.into()),
                 borderless,
+            }),
+            crate::input::actions::Action::SetPaneBorderStyle {
+                pane_id,
+                border_style,
+            } => ActionType::SetPaneBorderStyle(SetPaneBorderStyleAction {
+                pane_id: Some(pane_id.into()),
+                border_style: Some(border_style.into()),
             }),
             crate::input::actions::Action::TogglePaneInGroup => {
                 ActionType::TogglePaneInGroup(TogglePaneInGroupAction {})
@@ -2196,6 +2552,19 @@ impl From<crate::input::actions::Action>
                     pane_id: Some(pane_id.into()),
                 })
             },
+            crate::input::actions::Action::TogglePaneInGroupByPaneId { pane_id } => {
+                ActionType::TogglePaneInGroupByPaneId(TogglePaneInGroupByPaneIdAction {
+                    pane_id: Some(pane_id.into()),
+                })
+            },
+            crate::input::actions::Action::StartRenamePaneByPaneId { pane_id } => {
+                ActionType::StartRenamePaneByPaneId(StartRenamePaneByPaneIdAction {
+                    pane_id: Some(pane_id.into()),
+                })
+            },
+            crate::input::actions::Action::StartRenameTabByTabId { id } => {
+                ActionType::StartRenameTabByTabId(StartRenameTabByTabIdAction { id })
+            },
             crate::input::actions::Action::FocusPaneByPaneId { pane_id } => {
                 ActionType::FocusPaneByPaneId(FocusPaneByPaneIdAction {
                     pane_id: Some(pane_id.into()),
@@ -2217,11 +2586,26 @@ impl From<crate::input::actions::Action>
             crate::input::actions::Action::NextSwapLayoutByTabId { id } => {
                 ActionType::NextSwapLayoutByTabId(NextSwapLayoutByTabIdAction { id })
             },
+            crate::input::actions::Action::ApplyTiledSwapLayoutByTabId { id, name } => {
+                ActionType::ApplyTiledSwapLayoutByTabId(ApplyTiledSwapLayoutByTabIdAction {
+                    id,
+                    name,
+                })
+            },
+            crate::input::actions::Action::ApplyFloatingSwapLayoutByTabId { id, name } => {
+                ActionType::ApplyFloatingSwapLayoutByTabId(ApplyFloatingSwapLayoutByTabIdAction {
+                    id,
+                    name,
+                })
+            },
             crate::input::actions::Action::MoveTabByTabId { id, direction } => {
                 ActionType::MoveTabByTabId(MoveTabByTabIdAction {
                     id,
                     direction: direction_to_proto_i32(direction),
                 })
+            },
+            crate::input::actions::Action::MoveTabToPosition { id, position } => {
+                ActionType::MoveTabToPosition(MoveTabToPositionAction { id, position })
             },
         };
 
@@ -2459,6 +2843,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                     near_current_pane: new_tiled_action.near_current_pane,
                     no_focus: new_tiled_action.no_focus,
                     borderless: new_tiled_action.borderless,
+                    border_style: new_tiled_action.border_style.map(|b| b.into()),
                     tab_id: new_tiled_action.tab_id.map(|t| t as usize),
                 })
             },
@@ -2614,6 +2999,18 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                 })
             },
             ActionType::UndoRenameTab(_) => Ok(crate::input::actions::Action::UndoRenameTab),
+            ActionType::SessionNameInput(session_name_action) => {
+                Ok(crate::input::actions::Action::SessionNameInput {
+                    input: session_name_action
+                        .input
+                        .into_iter()
+                        .map(|b| b as u8)
+                        .collect(),
+                })
+            },
+            ActionType::UndoRenameSession(_) => {
+                Ok(crate::input::actions::Action::UndoRenameSession)
+            },
             ActionType::MoveTab(move_tab_action) => Ok(crate::input::actions::Action::MoveTab {
                 direction: proto_i32_to_direction(move_tab_action.direction)?,
             }),
@@ -2625,10 +3022,92 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                 near_current_pane: run_action.near_current_pane,
                 no_focus: run_action.no_focus,
             }),
+            ActionType::RunInBackground(run_action) => {
+                Ok(crate::input::actions::Action::RunInBackground {
+                    command: run_action
+                        .command
+                        .ok_or_else(|| anyhow!("RunInBackground missing command"))?
+                        .try_into()?,
+                })
+            },
             ActionType::Detach(_) => Ok(crate::input::actions::Action::Detach),
             ActionType::SetDarkTheme(_) => Ok(crate::input::actions::Action::SetDarkTheme),
             ActionType::SetLightTheme(_) => Ok(crate::input::actions::Action::SetLightTheme),
             ActionType::ToggleTheme(_) => Ok(crate::input::actions::Action::ToggleTheme),
+            ActionType::DismissInfoPopups(_) => {
+                Ok(crate::input::actions::Action::DismissInfoPopups)
+            },
+            ActionType::OpenContextMenu(_) => Ok(crate::input::actions::Action::OpenContextMenu),
+            ActionType::MutePane(_) => Ok(crate::input::actions::Action::MutePane),
+            ActionType::IgnorePaneOutput(_) => Ok(crate::input::actions::Action::IgnorePaneOutput),
+            ActionType::WatchPane(_) => Ok(crate::input::actions::Action::WatchPane),
+            ActionType::MuteTab(_) => Ok(crate::input::actions::Action::MuteTab),
+            ActionType::MuteSession(_) => Ok(crate::input::actions::Action::MuteSession),
+            ActionType::ToggleSession(_) => Ok(crate::input::actions::Action::ToggleSession),
+            ActionType::GoToPreviousSession(_) => {
+                Ok(crate::input::actions::Action::GoToPreviousSession)
+            },
+            ActionType::GoToNextSession(_) => Ok(crate::input::actions::Action::GoToNextSession),
+            ActionType::GoToNextAttention(_) => {
+                Ok(crate::input::actions::Action::GoToNextAttention)
+            },
+            ActionType::ToggleTrayIcon(_) => Ok(crate::input::actions::Action::ToggleTrayIcon),
+            ActionType::OpenSessionInWindow(_) => {
+                Ok(crate::input::actions::Action::OpenSessionInWindow)
+            },
+            ActionType::WaitForPaneExit(a) => Ok(crate::input::actions::Action::WaitForPaneExit {
+                pane_id: a
+                    .pane_id
+                    .ok_or_else(|| anyhow!("WaitForPaneExit missing pane_id"))?
+                    .try_into()?,
+            }),
+            ActionType::MarkPaneSeen(a) => Ok(crate::input::actions::Action::MarkPaneSeen {
+                session: a.session,
+                pane_id: a.pane_id.map(|p| p.try_into()).transpose()?,
+            }),
+            ActionType::MarkAllSeen(a) => Ok(crate::input::actions::Action::MarkAllSeen {
+                session: a.session,
+                this_session: a.this_session,
+            }),
+            ActionType::WriteKeyToPaneId(a) => {
+                Ok(crate::input::actions::Action::WriteKeyToPaneId {
+                    key_with_modifier: a.key_with_modifier.map(|k| k.try_into()).transpose()?,
+                    pane_id: a
+                        .pane_id
+                        .ok_or_else(|| anyhow!("WriteKeyToPaneId missing pane_id"))?
+                        .try_into()?,
+                })
+            },
+            ActionType::MutePaneByPaneId(a) => {
+                Ok(crate::input::actions::Action::MutePaneByPaneId {
+                    pane_id: a
+                        .pane_id
+                        .ok_or_else(|| anyhow!("MutePaneByPaneId missing pane_id"))?
+                        .try_into()?,
+                })
+            },
+            ActionType::IgnorePaneOutputByPaneId(a) => {
+                Ok(crate::input::actions::Action::IgnorePaneOutputByPaneId {
+                    pane_id: a
+                        .pane_id
+                        .ok_or_else(|| anyhow!("IgnorePaneOutputByPaneId missing pane_id"))?
+                        .try_into()?,
+                })
+            },
+            ActionType::WatchPaneByPaneId(a) => {
+                Ok(crate::input::actions::Action::WatchPaneByPaneId {
+                    pane_id: a
+                        .pane_id
+                        .ok_or_else(|| anyhow!("WatchPaneByPaneId missing pane_id"))?
+                        .try_into()?,
+                })
+            },
+            ActionType::MuteTabByTabId(a) => {
+                Ok(crate::input::actions::Action::MuteTabByTabId { id: a.id })
+            },
+            ActionType::ToggleSessionCard(_) => {
+                Ok(crate::input::actions::Action::ToggleSessionCard)
+            },
             ActionType::SwitchSession(switch_session_action) => {
                 Ok(crate::input::actions::Action::SwitchSession {
                     name: switch_session_action.name.clone(),
@@ -2642,6 +3121,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                         .map(|l| l.try_into())
                         .transpose()?,
                     cwd: switch_session_action.cwd.map(PathBuf::from),
+                    close_current: switch_session_action.close_current,
                 })
             },
             ActionType::LaunchOrFocusPlugin(launch_plugin_action) => {
@@ -2718,6 +3198,12 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                 Ok(crate::input::actions::Action::PreviousSwapLayout)
             },
             ActionType::NextSwapLayout(_) => Ok(crate::input::actions::Action::NextSwapLayout),
+            ActionType::ApplyTiledSwapLayout(a) => {
+                Ok(crate::input::actions::Action::ApplyTiledSwapLayout { name: a.name })
+            },
+            ActionType::ApplyFloatingSwapLayout(a) => {
+                Ok(crate::input::actions::Action::ApplyFloatingSwapLayout { name: a.name })
+            },
             ActionType::OverrideLayout(override_layout_action) => {
                 Ok(crate::input::actions::Action::OverrideLayout {
                     tabs: override_layout_action
@@ -2890,6 +3376,10 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                 in_place: cli_pipe_action.in_place,
                 cwd: cli_pipe_action.cwd.map(PathBuf::from),
                 pane_title: cli_pipe_action.pane_title,
+                popup: cli_pipe_action
+                    .popup
+                    .and_then(|p| p.parse::<crate::data::PipePopupPlacement>().ok()),
+                popup_no_focus: cli_pipe_action.popup_no_focus,
             }),
             ActionType::KeybindPipe(keybind_pipe_action) => {
                 Ok(crate::input::actions::Action::KeybindPipe {
@@ -2978,6 +3468,18 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                         .ok_or_else(|| anyhow!("SetPaneBorderless missing pane_id"))?
                         .try_into()?,
                     borderless: set_borderless_action.borderless,
+                })
+            },
+            ActionType::SetPaneBorderStyle(set_border_style_action) => {
+                Ok(crate::input::actions::Action::SetPaneBorderStyle {
+                    pane_id: set_border_style_action
+                        .pane_id
+                        .ok_or_else(|| anyhow!("SetPaneBorderStyle missing pane_id"))?
+                        .try_into()?,
+                    border_style: set_border_style_action
+                        .border_style
+                        .map(|b| b.into())
+                        .unwrap_or_default(),
                 })
             },
             ActionType::TogglePaneInGroup(_) => {
@@ -3170,6 +3672,25 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
                         .try_into()?,
                 })
             },
+            ActionType::TogglePaneInGroupByPaneId(a) => {
+                Ok(crate::input::actions::Action::TogglePaneInGroupByPaneId {
+                    pane_id: a
+                        .pane_id
+                        .ok_or_else(|| anyhow!("TogglePaneInGroupByPaneId missing pane_id"))?
+                        .try_into()?,
+                })
+            },
+            ActionType::StartRenamePaneByPaneId(a) => {
+                Ok(crate::input::actions::Action::StartRenamePaneByPaneId {
+                    pane_id: a
+                        .pane_id
+                        .ok_or_else(|| anyhow!("StartRenamePaneByPaneId missing pane_id"))?
+                        .try_into()?,
+                })
+            },
+            ActionType::StartRenameTabByTabId(a) => {
+                Ok(crate::input::actions::Action::StartRenameTabByTabId { id: a.id })
+            },
             ActionType::FocusPaneByPaneId(a) => {
                 Ok(crate::input::actions::Action::FocusPaneByPaneId {
                     pane_id: a
@@ -3194,11 +3715,29 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
             ActionType::NextSwapLayoutByTabId(a) => {
                 Ok(crate::input::actions::Action::NextSwapLayoutByTabId { id: a.id })
             },
+            ActionType::ApplyTiledSwapLayoutByTabId(a) => {
+                Ok(crate::input::actions::Action::ApplyTiledSwapLayoutByTabId {
+                    id: a.id,
+                    name: a.name,
+                })
+            },
+            ActionType::ApplyFloatingSwapLayoutByTabId(a) => Ok(
+                crate::input::actions::Action::ApplyFloatingSwapLayoutByTabId {
+                    id: a.id,
+                    name: a.name,
+                },
+            ),
             ActionType::MoveTabByTabId(a) => {
                 let direction = proto_i32_to_direction(a.direction)?;
                 Ok(crate::input::actions::Action::MoveTabByTabId {
                     id: a.id,
                     direction,
+                })
+            },
+            ActionType::MoveTabToPosition(a) => {
+                Ok(crate::input::actions::Action::MoveTabToPosition {
+                    id: a.id,
+                    position: a.position,
                 })
             },
         }
@@ -3286,6 +3825,7 @@ impl From<crate::data::ConnectToSession>
             }),
             layout: connect.layout.map(|l| l.into()),
             cwd: connect.cwd.map(|p| p.to_string_lossy().to_string()),
+            switch_context: connect.switch_context.map(|c| c.into()),
         }
     }
 }
@@ -3303,6 +3843,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::ConnectToSes
             pane_id: connect.pane_id.map(|p| (p.pane_id, p.is_plugin)),
             layout: connect.layout.map(|l| l.try_into()).transpose()?,
             cwd: connect.cwd.map(PathBuf::from),
+            switch_context: connect.switch_context.map(|c| c.try_into()).transpose()?,
         })
     }
 }
@@ -3496,6 +4037,7 @@ fn input_mode_to_proto_i32(mode: InputMode) -> i32 {
         InputMode::Move => ProtoInputMode::Move as i32,
         InputMode::Prompt => ProtoInputMode::Prompt as i32,
         InputMode::Tmux => ProtoInputMode::Tmux as i32,
+        InputMode::RenameSession => ProtoInputMode::RenameSession as i32,
     }
 }
 
@@ -3515,6 +4057,7 @@ fn proto_i32_to_input_mode(i: i32) -> Result<InputMode> {
         Some(ProtoInputMode::Move) => Ok(InputMode::Move),
         Some(ProtoInputMode::Prompt) => Ok(InputMode::Prompt),
         Some(ProtoInputMode::Tmux) => Ok(InputMode::Tmux),
+        Some(ProtoInputMode::RenameSession) => Ok(InputMode::RenameSession),
         _ => Err(anyhow!("Invalid InputMode value: {}", i)),
     }
 }
@@ -3819,6 +4362,62 @@ impl TryFrom<crate::client_server_contract::client_server_contract::FloatingCoor
     }
 }
 
+fn line_style_to_proto_i32(line_style: crate::data::LineStyle) -> i32 {
+    use crate::client_server_contract::client_server_contract::LineStyle as ProtoLineStyle;
+    let proto = match line_style {
+        crate::data::LineStyle::Single => ProtoLineStyle::Single,
+        crate::data::LineStyle::Double => ProtoLineStyle::Double,
+        crate::data::LineStyle::Heavy => ProtoLineStyle::Heavy,
+        crate::data::LineStyle::Dashed => ProtoLineStyle::Dashed,
+        crate::data::LineStyle::HeavyDashed => ProtoLineStyle::HeavyDashed,
+    };
+    proto as i32
+}
+
+fn proto_i32_to_line_style(value: i32) -> crate::data::LineStyle {
+    use crate::client_server_contract::client_server_contract::LineStyle as ProtoLineStyle;
+    match ProtoLineStyle::try_from(value) {
+        Ok(ProtoLineStyle::Single) => crate::data::LineStyle::Single,
+        Ok(ProtoLineStyle::Double) => crate::data::LineStyle::Double,
+        Ok(ProtoLineStyle::Heavy) => crate::data::LineStyle::Heavy,
+        Ok(ProtoLineStyle::Dashed) => crate::data::LineStyle::Dashed,
+        Ok(ProtoLineStyle::HeavyDashed) => crate::data::LineStyle::HeavyDashed,
+        Err(_) => crate::data::LineStyle::Single,
+    }
+}
+
+impl From<crate::data::BorderStyleOverride>
+    for crate::client_server_contract::client_server_contract::BorderStyleOverride
+{
+    fn from(border_style: crate::data::BorderStyleOverride) -> Self {
+        Self {
+            all: border_style.all.map(line_style_to_proto_i32),
+            top: border_style.top.map(line_style_to_proto_i32),
+            right: border_style.right.map(line_style_to_proto_i32),
+            bottom: border_style.bottom.map(line_style_to_proto_i32),
+            left: border_style.left.map(line_style_to_proto_i32),
+            rounded_corners: border_style.rounded_corners,
+        }
+    }
+}
+
+impl From<crate::client_server_contract::client_server_contract::BorderStyleOverride>
+    for crate::data::BorderStyleOverride
+{
+    fn from(
+        border_style: crate::client_server_contract::client_server_contract::BorderStyleOverride,
+    ) -> Self {
+        Self {
+            all: border_style.all.map(proto_i32_to_line_style),
+            top: border_style.top.map(proto_i32_to_line_style),
+            right: border_style.right.map(proto_i32_to_line_style),
+            bottom: border_style.bottom.map(proto_i32_to_line_style),
+            left: border_style.left.map(proto_i32_to_line_style),
+            rounded_corners: border_style.rounded_corners,
+        }
+    }
+}
+
 // FloatingPaneCoordinates conversion
 impl From<crate::data::FloatingPaneCoordinates>
     for crate::client_server_contract::client_server_contract::FloatingPaneCoordinates
@@ -3831,6 +4430,7 @@ impl From<crate::data::FloatingPaneCoordinates>
             height: coords.height.map(|h| h.into()),
             pinned: coords.pinned,
             borderless: coords.borderless,
+            border_style: coords.border_style.map(|b| b.into()),
         }
     }
 }
@@ -3850,6 +4450,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::FloatingPane
             height: coords.height.map(|h| h.try_into()).transpose()?,
             pinned: coords.pinned,
             borderless: coords.borderless,
+            border_style: coords.border_style.map(|b| b.into()),
         })
     }
 }
@@ -3865,24 +4466,30 @@ impl From<crate::data::NewPanePlacement>
         };
         let placement_type = match placement {
             crate::data::NewPanePlacement::NoPreference {
-                borderless: Some(b),
+                borderless: None,
+                border_style: None,
+            } => PlacementType::NoPreference(true),
+            crate::data::NewPanePlacement::NoPreference {
+                borderless,
+                border_style,
             } => PlacementType::NoPreferenceWithOptions(NoPreferencePlacement {
-                borderless: Some(b),
-            }),
-            crate::data::NewPanePlacement::NoPreference { borderless: None } => {
-                PlacementType::NoPreference(true)
-            },
-            crate::data::NewPanePlacement::Tiled {
-                direction,
-                borderless: Some(b),
-            } => PlacementType::TiledWithOptions(TiledPlacement {
-                direction: direction.map(direction_to_proto_i32),
-                borderless: Some(b),
+                borderless,
+                border_style: border_style.map(|b| b.into()),
             }),
             crate::data::NewPanePlacement::Tiled {
                 direction,
                 borderless: None,
+                border_style: None,
             } => PlacementType::Tiled(direction.map(direction_to_proto_i32).unwrap_or(0)),
+            crate::data::NewPanePlacement::Tiled {
+                direction,
+                borderless,
+                border_style,
+            } => PlacementType::TiledWithOptions(TiledPlacement {
+                direction: direction.map(direction_to_proto_i32),
+                borderless,
+                border_style: border_style.map(|b| b.into()),
+            }),
             crate::data::NewPanePlacement::Floating(coords) => {
                 PlacementType::Floating(coords.map(|c| c.into()).unwrap_or_default())
             },
@@ -3890,28 +4497,33 @@ impl From<crate::data::NewPanePlacement>
                 pane_id_to_replace,
                 close_replaced_pane,
                 borderless,
+                border_style,
             } => PlacementType::InPlace(
                 crate::client_server_contract::client_server_contract::NewPanePlacementInPlace {
                     pane_id_to_replace: pane_id_to_replace.map(|id| id.into()),
                     close_replaced_pane,
                     borderless,
+                    border_style: border_style.map(|b| b.into()),
                 },
             ),
             crate::data::NewPanePlacement::Stacked {
                 pane_id_to_stack_under,
-                borderless: Some(b),
-            } => PlacementType::StackedWithOptions(StackedPlacement {
-                pane_id_to_stack_under: pane_id_to_stack_under.map(|id| id.into()),
-                borderless: Some(b),
-            }),
-            crate::data::NewPanePlacement::Stacked {
-                pane_id_to_stack_under,
                 borderless: None,
+                border_style: None,
             } => PlacementType::Stacked(
                 pane_id_to_stack_under
                     .map(|id| id.into())
                     .unwrap_or_default(),
             ),
+            crate::data::NewPanePlacement::Stacked {
+                pane_id_to_stack_under,
+                borderless,
+                border_style,
+            } => PlacementType::StackedWithOptions(StackedPlacement {
+                pane_id_to_stack_under: pane_id_to_stack_under.map(|id| id.into()),
+                borderless,
+                border_style: border_style.map(|b| b.into()),
+            }),
         };
         Self {
             placement_type: Some(placement_type),
@@ -3936,6 +4548,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::NewPanePlace
             PlacementType::NoPreferenceWithOptions(opts) => {
                 Ok(crate::data::NewPanePlacement::NoPreference {
                     borderless: opts.borderless,
+                    border_style: opts.border_style.map(|b| b.into()),
                 })
             },
             PlacementType::TiledWithOptions(opts) => {
@@ -3943,6 +4556,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::NewPanePlace
                 Ok(crate::data::NewPanePlacement::Tiled {
                     direction,
                     borderless: opts.borderless,
+                    border_style: opts.border_style.map(|b| b.into()),
                 })
             },
             PlacementType::StackedWithOptions(opts) => {
@@ -3953,12 +4567,14 @@ impl TryFrom<crate::client_server_contract::client_server_contract::NewPanePlace
                 Ok(crate::data::NewPanePlacement::Stacked {
                     pane_id_to_stack_under: pane_id,
                     borderless: opts.borderless,
+                    border_style: opts.border_style.map(|b| b.into()),
                 })
             },
             // Legacy fields (without borderless support)
-            PlacementType::NoPreference(_) => {
-                Ok(crate::data::NewPanePlacement::NoPreference { borderless: None })
-            },
+            PlacementType::NoPreference(_) => Ok(crate::data::NewPanePlacement::NoPreference {
+                borderless: None,
+                border_style: None,
+            }),
             PlacementType::Tiled(direction) => {
                 let direction = if direction == 0 {
                     None
@@ -3968,6 +4584,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::NewPanePlace
                 Ok(crate::data::NewPanePlacement::Tiled {
                     direction,
                     borderless: None,
+                    border_style: None,
                 })
             },
             PlacementType::Floating(coords) => {
@@ -3985,6 +4602,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::NewPanePlace
                     .transpose()?,
                 close_replaced_pane: in_place.close_replaced_pane,
                 borderless: in_place.borderless,
+                border_style: in_place.border_style.map(|b| b.into()),
             }),
             PlacementType::Stacked(pane_id) => {
                 let pane_id = if pane_id == Default::default() {
@@ -3995,6 +4613,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::NewPanePlace
                 Ok(crate::data::NewPanePlacement::Stacked {
                     pane_id_to_stack_under: pane_id,
                     borderless: None,
+                    border_style: None,
                 })
             },
         }
@@ -4030,6 +4649,7 @@ impl From<crate::input::mouse::MouseEvent>
             wheel_down: event.wheel_down,
             wheel_left: event.wheel_left,
             wheel_right: event.wheel_right,
+            wheel_lines: u32::from(event.wheel_lines),
             shift: event.shift,
             alt: event.alt,
             ctrl: event.ctrl,
@@ -4052,6 +4672,7 @@ impl From<crate::input::command::RunCommandAction>
             hold_on_start: action.hold_on_start,
             originating_plugin: action.originating_plugin.map(|op| op.into()),
             use_terminal_title: action.use_terminal_title,
+            notify: action.notify,
         }
     }
 }
@@ -4087,7 +4708,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::OriginatingP
 
         Ok(Self {
             plugin_id: orig.plugin_id,
-            client_id: orig.client_id as u16,
+            client_id: orig.client_id as ClientId,
             context,
         })
     }
@@ -4154,6 +4775,7 @@ impl From<crate::input::layout::Run>
                         hold_on_start: cmd.hold_on_start,
                         originating_plugin: cmd.originating_plugin.map(|op| op.into()),
                         use_terminal_title: cmd.use_terminal_title,
+                        notify: cmd.notify,
                     },
                 )),
             },
@@ -4273,6 +4895,9 @@ impl From<crate::input::layout::TiledPaneLayout>
             pane_initial_contents: layout.pane_initial_contents,
             default_fg: layout.default_fg,
             default_bg: layout.default_bg,
+            border_style: layout.border_style.map(|b| b.into()),
+            attention_muted: layout.attention_muted,
+            ignore_output: layout.ignore_output,
         }
     }
 }
@@ -4296,6 +4921,9 @@ impl From<crate::input::layout::FloatingPaneLayout>
             borderless: layout.borderless,
             default_fg: layout.default_fg,
             default_bg: layout.default_bg,
+            border_style: layout.border_style.map(|b| b.into()),
+            attention_muted: layout.attention_muted,
+            ignore_output: layout.ignore_output,
         }
     }
 }
@@ -4508,6 +5136,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::CommandOrPlu
                     path: std::path::PathBuf::from(&f.path),
                     line_number: f.line_number.map(|n| n as usize),
                     cwd: f.cwd.map(std::path::PathBuf::from),
+                    border_style: None,
                 },
             )),
         }
@@ -4539,6 +5168,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Run>
                         .map(|op| op.try_into())
                         .transpose()?,
                     use_terminal_title: cmd.use_terminal_title,
+                    notify: cmd.notify,
                 },
             )),
             RunType::EditFile(edit) => Ok(crate::input::layout::Run::EditFile(
@@ -4619,6 +5249,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::MouseEvent>
             wheel_down: event.wheel_down,
             wheel_left: event.wheel_left,
             wheel_right: event.wheel_right,
+            wheel_lines: u16::try_from(event.wheel_lines).unwrap_or(u16::MAX),
             shift: event.shift,
             alt: event.alt,
             ctrl: event.ctrl,
@@ -4648,6 +5279,7 @@ impl TryFrom<crate::client_server_contract::client_server_contract::RunCommandAc
                 .map(|op| op.try_into())
                 .transpose()?,
             use_terminal_title: action.use_terminal_title,
+            notify: action.notify,
         })
     }
 }
@@ -4708,6 +5340,9 @@ impl TryFrom<crate::client_server_contract::client_server_contract::TiledPaneLay
             pane_initial_contents: layout.pane_initial_contents,
             default_fg: layout.default_fg,
             default_bg: layout.default_bg,
+            border_style: layout.border_style.map(|b| b.into()),
+            attention_muted: layout.attention_muted,
+            ignore_output: layout.ignore_output,
         })
     }
 }
@@ -4742,6 +5377,9 @@ impl TryFrom<crate::client_server_contract::client_server_contract::FloatingPane
             borderless: layout.borderless,
             default_fg: layout.default_fg,
             default_bg: layout.default_bg,
+            border_style: layout.border_style.map(|b| b.into()),
+            attention_muted: layout.attention_muted,
+            ignore_output: layout.ignore_output,
         })
     }
 }
